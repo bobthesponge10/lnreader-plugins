@@ -11,7 +11,7 @@ class KavitaPlugin implements Plugin.PluginBase {
 
   site = storage.get('url');
   apiKey = storage.get('apiKey');
-  version = '1.0.0';
+  version = '1.0.1';
   filters: Filters | undefined = undefined;
   imageRequestInit?: Plugin.ImageRequestInit | undefined = undefined;
 
@@ -167,6 +167,55 @@ class KavitaPlugin implements Plugin.PluginBase {
     return this.getNovelsByFilter(request_filters, pageNo);
   }
 
+  parseKavitaChapters(
+    inputChapters: KavitaBookChapter[],
+    start_page_range: number,
+    end_page_range: number,
+    chapter_index_start: number,
+    release_date: string,
+    library_id: string,
+    series_id: string,
+    chapter_id: string,
+  ): Plugin.ChapterItem[] {
+    const chapters: Plugin.ChapterItem[] = [];
+
+    let chapter_index = chapter_index_start;
+    for (const chapter of inputChapters) {
+      let children = chapter.children || [];
+      let end_page = end_page_range;
+      if (chapter_index < inputChapters.length - 1) {
+        end_page = inputChapters[chapter_index + 1].page - 1;
+      }
+
+      if (children.length > 0) {
+        let processed_children = this.parseKavitaChapters(
+          children,
+          chapter.page,
+          end_page,
+          chapter_index,
+          release_date,
+          library_id,
+          series_id,
+          chapter_id,
+        );
+        chapter_index += processed_children.length;
+        chapters.push(...processed_children);
+        continue;
+      }
+
+      const c: Plugin.ChapterItem = {
+        name: chapter.title,
+        path: `${library_id}/${series_id}/${chapter_id}/${chapter_index}/${chapter.page}/${end_page}`,
+        releaseTime: release_date,
+        chapterNumber: chapter_index,
+      };
+      chapters.push(c);
+      chapter_index++;
+    }
+
+    return chapters;
+  }
+
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
     const [library_id, series_id, chapter_id] = novelPath.split('/', 3);
     const novel: Plugin.SourceNovel = {
@@ -216,26 +265,16 @@ class KavitaPlugin implements Plugin.PluginBase {
       throw new Error('Failed to load novel chapters from kavita.');
     }
 
-    const chapters: Plugin.ChapterItem[] = [];
-
-    let chapter_index = 0;
-    for (const chapter of chapter_data) {
-      let end_page = data.pages;
-      if (chapter_index < chapter_data.length - 1) {
-        end_page = chapter_data[chapter_index + 1].page - 1;
-      }
-
-      const c: Plugin.ChapterItem = {
-        name: chapter.title,
-        path: `${library_id}/${series_id}/${chapter_id}/${chapter_index}/${chapter.page}/${end_page}`,
-        releaseTime: data.releaseDate,
-        chapterNumber: chapter_index,
-      };
-      chapters.push(c);
-      chapter_index++;
-    }
-
-    novel.chapters = chapters;
+    novel.chapters = this.parseKavitaChapters(
+      chapter_data,
+      0,
+      data.pages,
+      0,
+      data.releaseDate,
+      library_id,
+      series_id,
+      chapter_id,
+    );
     return novel;
   }
 
